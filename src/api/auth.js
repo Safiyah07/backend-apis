@@ -6,6 +6,8 @@ const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const axios = require("axios");
 const { authMiddleware } = require("../middleware/authMiddleware");
+const sendEmail = require("../service/sendEmail");
+const e = require("express");
 
 const generateSecureCode = (length = 4) => {
   return Math.random()
@@ -13,37 +15,186 @@ const generateSecureCode = (length = 4) => {
     .slice(2, 2 + length); // e.g. "4830"
 };
 
-const sendVerificationEmail = async (email, name, code) => {
-  const mailPayload = {
-    addresses: [email],
-    subject: "Verify Your School's Email Address",
-    content: `
-      <p>Hello <b>${name}</b>,</p>
-      <p>You're almost set! To confirm your email address, please use the verification code below:</p>
-      <h2 style="color: #1a73e8;">${code}</h2>
-      <p>This code will expire in 1 hour.</p>
-      <br>
-      <p>Thanks,<br/>The Admin Team</p>
-    `,
-    attachments: null,
-  };
-
-  await axios.post(process.env.MAIL_SERVICE_URL, mailPayload);
-};
-
 const RESEND_COOLDOWN_MINUTES = 2;
 
-// send verification code for school registration
+// sign up user and send email
 router.post(
-  "/school/send-ver-code",
+  "/signup",
   asyncHandler(async (req, res) => {
     const {
-      name,
+      avatar_url,
+      first_name,
+      middle_name,
+      last_name,
       email,
       phone_number,
-      address,
-      school_reg_no,
-      school_code,
+      password,
+      confirm_password,
+    } = req.body;
+
+    // basic validation
+    if (
+      !first_name ||
+      !last_name ||
+      !email ||
+      !phone_number ||
+      !password ||
+      !confirm_password
+    ) {
+      console.log({ message: "Please fill all fields." });
+      return res.status(400).json({ message: "Please fill all fields." });
+    }
+
+    // check if passwords match
+    if (password !== confirm_password) {
+      console.log({ message: "Passwords do not match." });
+      return res.status(400).json({ message: "Passwords do not match." });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    try {
+      // check if user exists
+      const userExists = await pool.query(
+        "SELECT email FROM users WHERE email = $1",
+        [email]
+      );
+      if (userExists.rows.length > 0) {
+        return res
+          .status(400)
+          .json({ message: "User already registered. Please log in." });
+      }
+
+      // generate unique user_code
+      let unique = false;
+      let user_code;
+      while (!unique) {
+        user_code = `S${Math.floor(100000 + Math.random() * 900000)}`; // e.g. S123456
+        const idCheck = await pool.query(
+          "SELECT id FROM users WHERE user_code = $1",
+          [user_code]
+        );
+        if (idCheck.rows.length === 0) {
+          unique = true;
+        }
+      }
+
+      // insert new student into database
+      const user = await pool.query(
+        `INSERT INTO users 
+          (user_code, avatar_url, first_name, middle_name, last_name, email, phone_number, password)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         RETURNING *
+        `,
+        [
+          user_code,
+          avatar_url,
+          first_name,
+          middle_name,
+          last_name,
+          email,
+          phone_number,
+          hashedPassword,
+        ]
+      );
+
+      const userType = "user";
+
+      // console.log(user.rows[0]);
+      const newUser = user.rows[0];
+
+      // Step 4: Generate refresh/access token
+      const { token: refreshToken, expiresAt } = generateRefreshToken(
+        newUser.id,
+        userType
+      );
+
+      const existingToken = await pool.query(
+        `SELECT id FROM refresh_tokens 
+          WHERE user_type = $1 AND user_id = $2 AND purpose = $3
+          ORDER BY expires_at DESC LIMIT 1
+        `,
+        [userType, newUser.id, `${userType} login`]
+      );
+
+      if (existingToken.rows.length > 0) {
+        await pool.query(
+          `UPDATE refresh_tokens
+            SET token = $1, expires_at = $2, revoked = false
+            WHERE id = $3
+          `,
+          [refreshToken, expiresAt, existingToken.rows[0].id]
+        );
+      } else {
+        await pool.query(
+          `INSERT INTO refresh_tokens (user_type, user_id, token, expires_at, purpose)
+          VALUES ($1, $2, $3, $4, $5)`,
+          [userType, newUser.id, refreshToken, expiresAt, `${userType} login`]
+        );
+      }
+
+      // Cookie options
+      const cookieOptions = {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "None",
+        path: "/",
+        // ...(remember_user && { maxAge: 30 * 24 * 60 * 60 * 1000 }),
+      };
+
+      const accessToken = generateAccessToken(user.id, userType);
+
+      // Set cookie in response
+      res.cookie("refreshToken", refreshToken, cookieOptions);
+
+      // Prepare email content
+      // console.log(email);
+      let to, subject, message;
+
+      to = email;
+      subject = "Welcome to Our Platform 🎉";
+      message = `Hi ${first_name},<br><br>
+         Your account has been successfully created.<br>
+        You can now log in using either your email or phone number and the password you set during registration.<br><br>
+        Thank you for joining us!<br><br>
+        Best regards,<br>The Admin Team`;
+
+      // Send email
+      await sendEmail(to, subject, message)
+        .then((res) => res)
+        .catch((err) => {
+          console.error("Send Email Error:", err);
+          return { success: false, error: err.message };
+        });
+
+      res.status(201).json({
+        message: "Registration successful!",
+        data: {
+          userType,
+          ...accessToken,
+          refreshToken,
+        },
+      });
+    } catch (error) {
+      console.error(error);
+      res
+        .status(500)
+        .json({ message: "Server error during registration", data: null });
+    }
+  })
+);
+
+// send verification code for registration
+router.post(
+  "/send-ver-code",
+  asyncHandler(async (req, res) => {
+    const {
+      avatar_url,
+      first_name,
+      middle_name,
+      last_name,
+      email,
+      phone_number,
       password,
       confirm_password,
       terms,
@@ -59,14 +210,27 @@ router.post(
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    // Prepare email content
+    // console.log(email);
+    let to, subject, message;
+
+    to = email;
+    subject = "Welcome to Our Platform 🎉";
+    message = `Hi ${first_name},<br><br>
+         Your account is 90% ready!<br>
+        Use this code <h2 style="color:rgb(249, 76, 226);">${code}</h2> to verify your email and you'll be good to go.<br><br>
+        The code expires in 1 hour.<br>
+        Thank you for joining us, almost!<br><br>
+        Best regards,<br>The Admin Team`;
+
     try {
-      const schoolExists = await pool.query(
-        "SELECT email FROM schools WHERE email = $1",
+      const userExists = await pool.query(
+        "SELECT email FROM users WHERE email = $1",
         [email]
       );
-      if (schoolExists.rows.length > 0) {
+      if (userExists.rows.length > 0) {
         return res.status(400).json({
-          message: "School already registered. Please log in.",
+          message: "User already registered. Please log in.",
         });
       }
 
@@ -97,7 +261,13 @@ router.post(
           [code, expiresAt, now, email]
         );
 
-        await sendVerificationEmail(email, name, code);
+        // Send email
+        await sendEmail(to, subject, message)
+          .then((res) => res)
+          .catch((err) => {
+            console.error("Send Email Error:", err);
+            return { success: false, error: err.message };
+          });
 
         return res.json({
           message: "A new verification code has been sent to your email.",
@@ -107,16 +277,15 @@ router.post(
       // Insert new pending verification
       await pool.query(
         `INSERT INTO verification_codes 
-				(code_for, name, email, phone_number, address, school_reg_no, school_code, password, terms, code, expires_at, last_sent_at)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
+				(code_for, first_name, middle_name, last_name, email, phone_number, password, terms, code, expires_at, last_sent_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [
-          "school",
-          name,
+          "signup with code",
+          first_name,
+          middle_name,
+          last_name,
           email,
           phone_number,
-          address,
-          school_reg_no,
-          school_code,
           hashedPassword,
           terms,
           code,
@@ -125,7 +294,13 @@ router.post(
         ]
       );
 
-      await sendVerificationEmail(email, name, code);
+      // Send email
+      await sendEmail(to, subject, message)
+        .then((res) => res)
+        .catch((err) => {
+          console.error("Send Email Error:", err);
+          return { success: false, error: err.message };
+        });
 
       res.json({
         success: true,
@@ -135,15 +310,15 @@ router.post(
       console.error(error);
       res.status(500).json({
         success: false,
-        message: "Server error during verification code sending",
+        message: "Server error while sending verification code.",
       });
     }
   })
 );
 
-// compare verification code /api/compare-ver-code
+// compare verification code /compare-ver-code
 router.post(
-  "/school/compare-ver-code",
+  "/compare-ver-code",
   asyncHandler(async (req, res) => {
     const { email, code: userCode } = req.body;
 
@@ -159,53 +334,69 @@ router.post(
         return res.status(400).json({ error: "Invalid or expired code" });
       }
 
-      const verifiedSchool = result.rows[0];
+      const verifiedUser = result.rows[0];
+      console.log(verifiedUser);
+
+      // generate unique user_code
+      let unique = false;
+      let user_code;
+      while (!unique) {
+        user_code = `S${Math.floor(100000 + Math.random() * 900000)}`; // e.g. S123456
+        const idCheck = await pool.query(
+          "SELECT id FROM users WHERE user_code = $1",
+          [user_code]
+        );
+        if (idCheck.rows.length === 0) {
+          unique = true;
+        }
+      }
 
       // Step 2: Insert user data into `schools` table
       await pool.query(
-        `INSERT INTO schools 
-			(name, email, phone_number, address, school_reg_no, school_code, password, terms)
+        `INSERT INTO users 
+			(first_name, middle_name, last_name, email, phone_number, user_code, password, terms)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
         [
-          verifiedSchool.name,
-          verifiedSchool.email,
-          verifiedSchool.phone_number,
-          verifiedSchool.address,
-          verifiedSchool.school_reg_no,
-          verifiedSchool.school_code,
-          verifiedSchool.password,
-          verifiedSchool.terms,
+          verifiedUser.first_name,
+          verifiedUser.middle_name,
+          verifiedUser.last_name,
+          verifiedUser.email,
+          verifiedUser.phone_number,
+          user_code,
+          verifiedUser.password,
+          verifiedUser.terms,
         ]
       );
 
       // Step 3: Delete the used verification code
       await pool.query(`DELETE FROM verification_codes WHERE id = $1`, [
-        verifiedSchool.id,
+        verifiedUser.id,
       ]);
 
-      // Step 4: Send welcome email
-      const mailPayload = {
-        addresses: [verifiedSchool.email],
-        subject: "Welcome to Our Platform 🎉",
-        content: `Hi ${verifiedSchool.name},<br><br>
-        Your school has been successfully registered on our platform.<br>
-        You can now log in and start using the services.<br><br>
-        Thank you for joining us!<br><br>
-        Best regards,<br>The Team`,
-        attachments: null,
-      };
+      // Prepare welcome email content
+      let to, subject, message;
 
-      axios
-        .post(process.env.MAIL_SERVICE_URL, mailPayload)
-        .catch((error) =>
-          console.error("Welcome email failed:", error.message)
-        );
+      to = email;
+      subject = "Congratulations! Welcome to Our Platform 🎉";
+      message = `It's me again. ${verifiedUser.first_name}, i'm about to pop this grape juice,<br><br>
+         Your account was successfully created and i can see our future with you in it, i'm so gassed.<br>
+        You can now log in using either your email or phone number and the password you set during registration.<br><br>
+        Thank you for joining us!<br><br>
+        Best regards,<br>Sophia from The Admin Team`;
+
+      // Send email
+      await sendEmail(to, subject, message)
+        .then((res) => res)
+        .catch((err) => {
+          console.error("Send Email Error:", err);
+          return { success: false, error: err.message };
+        });
 
       // Step 5: Respond with success
       res.json({
         success: true,
         message:
-          "Verification successful. School registered and welcome email sent.",
+          "Verification successful. User registered and welcome email sent.",
       });
     } catch (error) {
       console.error("Verification error:", error);
@@ -216,234 +407,71 @@ router.post(
   })
 );
 
-// Login school /api/school/login
+// Login user /login
 router.post(
-  "/school/login",
+  "/login",
   asyncHandler(async (req, res) => {
     try {
-      const { school_code, password, remember_user } = req.body;
+      const { password, remember_user } = req.body;
+      let { user_key } = req.body;
+      // user_key = email || phone_number;
 
-      if (!school_code || !password) {
-        return res.status(400).json({ error: "Please fill all fields" });
+      // Ensure at least one identifier
+      if (!user_key || user_key.trim() === "") {
+        return res.status(400).json({
+          message:
+            "Authentication failed, Please provide either email or phone number",
+          data: null,
+        });
       }
 
-      // Step 1: Find school by school_code
+      // Decide which table and column to use
+      const identifier = user_key;
+      const table = "users";
 
-      // await pool.query("SET search_path TO public2");
+      if (!identifier || !password) {
+        return res.status(400).json({
+          message: "Authentication failed, Please fill all fields",
+          data: null,
+        });
+      }
+
+      // Lookup by email OR phone_number
       const result = await pool.query(
-        "SELECT * FROM schools WHERE school_code = $1",
-        [school_code]
-      );
-      if (!result.rows.length) {
-        return res.status(400).json({ error: "School code doesn't exist" });
-      }
-
-      const school = result.rows[0];
-
-      // Step 2: Compare passwords
-      const isMatch = await bcrypt.compare(password, school.password);
-      if (!isMatch) {
-        return res.status(400).json({ error: "Invalid credentials" });
-      }
-
-      // Step 3: Generate refresh/access token
-      const { token: refreshToken, expiresAt } = generateRefreshToken(
-        school.id,
-        school.role
+        `SELECT * FROM ${table} WHERE email = $1 OR phone_number = $1`,
+        [identifier]
       );
 
-      // Optional expiry check
-      const now = new Date();
-      if (expiresAt < now) {
-        return res
-          .status(403)
-          .json({ message: "Not authorized, token expired" });
+      if (result.rows.length === 0) {
+        return res.status(400).json({
+          message: "Authentication failed, User details not registered",
+          data: null,
+        });
       }
 
-      // Step 4: Check for existing refresh token
-      const existingToken = await pool.query(
-        `SELECT id FROM refresh_tokens 
-			 WHERE school_id = $1 AND purpose = $2
-			 ORDER BY expires_at DESC LIMIT 1`,
-        [school.id, "school login"]
-      );
+      const user = result.rows[0];
+      // console.log(user);
 
-      if (existingToken.rows.length > 0) {
-        // Update existing token
-        await pool.query(
-          `UPDATE refresh_tokens
-				 SET token = $1, expires_at = $2, used = false
-				 WHERE id = $3`,
-          [refreshToken, expiresAt, existingToken.rows[0].id]
-        );
-      } else {
-        // Insert new token
-        await pool.query(
-          `INSERT INTO refresh_tokens (token, school_id, expires_at, purpose)
-				 VALUES ($1, $2, $3, $4)`,
-          [refreshToken, school.id, expiresAt, "login"]
-        );
+      // Step 2: Compare password and admission number/email
+      const isPasswordCorrect = await bcrypt.compare(password, user.password);
+
+      if (!isPasswordCorrect) {
+        return res.status(400).json({
+          message: "Authentication failed, Invalid credentials",
+          data: null,
+        });
       }
 
-      // Step 5: Setup cookie options
-      const cookieOptions = {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "None",
-        path: "/",
-      };
-
-      if (remember_user) {
-        cookieOptions.maxAge = 30 * 24 * 60 * 60 * 1000; // 30 days
+      // Now validate identifier against the right column
+      if (user.email !== user_key && user.phone_number !== user_key) {
+        return res.status(400).json({
+          message: "Authentication failed, Invalid credentials",
+          data: null,
+        });
       }
 
-      // Step 6: Generate access token
-      const accessToken = generateAccessToken(school.id, school.role);
-
-      // Step 7: Send response
-      res.status(200).cookie("refreshToken", refreshToken, cookieOptions).json({
-        message: "School Login Successful",
-        accessToken,
-      });
-    } catch (error) {
-      console.error("Login error:", error);
-      res.status(500).json({ error: "Server error during login" });
-    }
-  })
-);
-
-// password creation for teacher and student
-router.post(
-  "/auth/create-password",
-  asyncHandler(async (req, res) => {
-    const { user_type, user_id, password, confirm_password } = req.body;
-
-    if (password !== confirm_password) {
-      return res.status(400).json({ message: "Passwords don't match" });
-    }
-
-    if (!user_id || !password) {
-      return res.status(400).json({ message: "Please fill all fields" });
-    }
-
-    try {
-      if (user_type === "teacher") {
-        // Check if teacher user_id exists
-        const result = await pool.query(
-          "SELECT * FROM teachers WHERE id = $1",
-          [user_id]
-        );
-
-        if (result.rows.length === 0) {
-          return res.status(400).json({ error: "Teacher not registered" });
-        }
-
-        // hash password
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        // update existing teacher with hashed password
-        await pool.query(`UPDATE teachers SET password = $1 WHERE id = $2`, [
-          hashedPassword,
-          user_id,
-        ]);
-      }
-      if (user_type === "student") {
-        // Check if student user_id exists
-        const result = await pool.query(
-          "SELECT * FROM students WHERE id = $1",
-          [user_id]
-        );
-
-        if (result.rows.length === 0) {
-          return res.status(400).json({ error: "Student not registered" });
-        }
-
-        // hash password
-        const hashedPassword = await bcrypt.hash(password, 10);
-
-        // update existing teacher with hashed password
-        await pool.query(`UPDATE students SET password = $1 WHERE id = $2`, [
-          hashedPassword,
-          user_id,
-        ]);
-      }
-
-      // return success message
-      return res
-        .status(200)
-        .json({ message: "Password Creation Successful", data: null });
-    } catch (error) {
-      return res.status(500).json({ message: "Server Error", data: null });
-    }
-  })
-);
-
-// sign up student /api/student/signup
-router.post(
-  "/participant/signup",
-  asyncHandler(async (req, res) => {
-    const {
-      avatar_url,
-      first_name,
-      middle_name,
-      last_name,
-      email,
-      phone_number,
-      password,
-      confirm_password,
-    } = req.body;
-
-    if (password !== confirm_password) {
-      return res.status(400).json({ message: "Passwords do not match." });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    try {
-      const studentExists = await pool.query(
-        "SELECT email FROM participants WHERE email = $1",
-        [email]
-      );
-      if (studentExists.rows.length > 0) {
-        return res
-          .status(400)
-          .json({ message: "Student already registered. Please log in." });
-      }
-
-      // generate unique participant_id
-      let unique = false;
-      let participant_id;
-      while (!unique) {
-        participant_id = `S${Math.floor(100000 + Math.random() * 900000)}`; // e.g. S123456
-        const idCheck = await pool.query(
-          "SELECT participant_id FROM participants WHERE participant_id = $1",
-          [participant_id]
-        );
-        if (idCheck.rows.length === 0) {
-          unique = true;
-        }
-      }
-
-      // insert new student into database
-      const user = await pool.query(
-        `INSERT INTO participants 
-          (participant_id, avatar_url, first_name, middle_name, last_name, email, phone_number, password)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING *
-        `,
-        [
-          participant_id,
-          avatar_url,
-          first_name,
-          middle_name,
-          last_name,
-          email,
-          phone_number,
-          hashedPassword,
-        ]
-      );
-
-      const userType = "participants";
+      // Step 3: Check for existing refresh token
+      const userType = "users";
 
       // Step 4: Generate refresh/access token
       const { token: refreshToken, expiresAt } = generateRefreshToken(
@@ -469,7 +497,7 @@ router.post(
         );
       } else {
         await pool.query(
-          `INSERT INTO refresh_tokens (user_type, user_id, token,          expires_at, purpose)
+          `INSERT INTO refresh_tokens (user_type, user_id, token, expires_at, purpose)
           VALUES ($1, $2, $3, $4, $5)`,
           [userType, user.id, refreshToken, expiresAt, `${userType} login`]
         );
@@ -484,80 +512,78 @@ router.post(
         // ...(remember_user && { maxAge: 30 * 24 * 60 * 60 * 1000 }),
       };
 
+      if (remember_user) {
+        cookieOptions.maxAge = 30 * 24 * 60 * 60 * 1000;
+      }
+
       const accessToken = generateAccessToken(user.id, userType);
 
-      const mailPayload = {
-        addresses: [email],
-        subject: "Nova Quiz Account Created 🎉",
-        content: `Hi ${first_name},<br><br>
-        Your student account has been successfully created on Nova Quiz.<br>
-        You can now log in using either your email or phone number and the password you set during registration.<br><br>
-        Thank you for joining us!<br><br>
-        Best regards,<br>The Nova Quiz Team`,
-        attachments: null,
-      };
-
-      const mailResponse = await axios.post(
-        process.env.MAIL_SERVICE_URL,
-        mailPayload
-      );
-
-      console.log("Mail Service Response:", mailResponse.status);
-      res.status(201).json({
-        message: "Registered successfully, redirecting to dashboard...",
-        data: {
-          userType,
-          ...accessToken,
-          refreshToken,
-        },
-      });
+      res
+        .status(200)
+        .cookie("refreshToken", refreshToken, cookieOptions)
+        .json({
+          message: `User Login Successful`,
+          data: {
+            userType,
+            ...accessToken,
+            refreshToken,
+          },
+        });
     } catch (error) {
       console.error(error);
-      res
-        .status(500)
-        .json({ message: "Server error during registration", data: null });
+      return res.status(500).json({
+        message: "Authentication failed",
+        data: null,
+      });
     }
   })
 );
 
-// change participant password
+// create / update password for users without/with password
 router.post(
-  "/participant/change-password",
-  authMiddleware(),
+  "/create-password",
   asyncHandler(async (req, res) => {
-    const { password } = req.body;
-    const { id } = req.user;
+    console.log(9876);
+    const { user_type, user_id, password, confirm_password } = req.body;
 
-    if (!id || !password) {
+    if (password !== confirm_password) {
+      return res.status(400).json({ message: "Passwords don't match" });
+    }
+
+    if (!user_id || !password) {
+      return res.status(400).json({ message: "Please fill all fields" });
+    }
+
+    try {
+      // Check if student user_id exists
+      const result = await pool.query("SELECT * FROM users WHERE id = $1", [
+        user_id,
+      ]);
+
+      if (result.rows.length === 0) {
+        return res.status(400).json({ error: "User not registered" });
+      }
+
+      // hash password
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      // update existing user with hashed password
+      await pool.query(
+        `UPDATE users SET password = $1, updated_at = $2 WHERE id = $3`,
+        [hashedPassword, new Date(), user_id]
+      );
+
+      // return success message
       return res
-        .status(400)
-        .json({ message: "Participant ID and password required" });
+        .status(200)
+        .json({ message: "Password Creation Successful", data: null });
+    } catch (error) {
+      return res.status(500).json({ message: "Server Error", data: null });
     }
-
-    // Hash the new password
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
-
-    // Update DB
-    const updateQuery = `
-      UPDATE participants 
-      SET password = $1 
-      WHERE id = $2 
-      RETURNING id, email
-    `;
-
-    const result = await pool.query(updateQuery, [hashedPassword, id]);
-
-    if (result.rowCount === 0) {
-      return res.status(404).json({ message: "Participant not found" });
-    }
-
-    res
-      .status(200)
-      .json({ message: "Password updated successfully", user: result.rows[0] });
   })
 );
 
+// START FROM HERE BELOW
 // refresh token
 router.post(
   "/refresh-token",
@@ -657,10 +683,6 @@ router.post(
           expiresIn: "15m",
         }
       );
-
-      // Hash the token
-      // const salt = await bcrypt.genSalt(10);
-      // const hashedToken = await bcrypt.hash(resetToken, salt);
 
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 

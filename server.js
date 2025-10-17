@@ -4,7 +4,8 @@ const cors = require("cors");
 const morgan = require("morgan");
 require("events").EventEmitter.defaultMaxListeners = 20;
 const cookieParser = require("cookie-parser");
-const client = require("./src/config/db");
+
+require("./src/config/db");
 
 const PORT = process.env.PORT || 3000;
 
@@ -31,7 +32,7 @@ app.get("/", (req, res) => {
   res.status(200).send("🚀 Server is running...");
 });
 
-app.use("/api", require("./src/api/auth"));
+app.use("/api/auth", require("./src/api/auth"));
 
 // Start server
 app.listen(PORT, () => {

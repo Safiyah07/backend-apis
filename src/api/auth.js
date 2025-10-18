@@ -4,10 +4,7 @@ const asyncHandler = require("express-async-handler");
 const pool = require("../config/db");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
-const axios = require("axios");
-const { authMiddleware } = require("../middleware/authMiddleware");
 const sendEmail = require("../service/sendEmail");
-const e = require("express");
 
 const generateSecureCode = (length = 4) => {
   return Math.random()
@@ -621,8 +618,6 @@ router.post(
         console.log("Refresh token generation failed");
       }
 
-      // const hashedNew = await bcrypt.hash(token, 10);
-
       // Rotate: remove old token, insert new one
       await pool.query(
         "DELETE FROM refresh_tokens WHERE user_type = $1 AND user_id = $2",
@@ -692,24 +687,23 @@ router.post(
         [resetToken, user_type, user.id, expiresAt, "forgot password"]
       );
 
-      console.log("you are here");
-
       // Create reset URL with raw token
       const resetUrl = `http://localhost:4200/auth/reset-password?token=${resetToken}`;
 
-      const mailPayload = {
-        addresses: [email],
-        subject: "Password Reset",
-        content: `You are receiving this email because you requested a password reset. Click the link below to reset your password: <br><a href="${resetUrl}">${resetUrl}</a><br>The link expires in 15 minutes! If you did not request this, please ignore this email.`,
-        attachments: null,
-      };
+      // Prepare email content
+      let to, subject, message;
 
-      const mailResponse = await axios.post(
-        process.env.MAIL_SERVICE_URL,
-        mailPayload
-      );
+      to = email;
+      subject = "Password Reset Request 🔐";
+      message = `You are receiving this email because you requested a password reset. Click the link below to reset your password: <br><a href="${resetUrl}">${resetUrl}</a><br>Note: The link expires in 15 minutes! If you did not request this, please ignore this email.`;
 
-      console.log("Mail Service Response:", mailResponse.status);
+      // Send email
+      await sendEmail(to, subject, message)
+        .then((res) => res)
+        .catch((err) => {
+          console.error("Send Email Error:", err);
+          return { success: false, error: err.message };
+        });
 
       res
         .status(200)

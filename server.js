@@ -4,6 +4,10 @@ const cors = require("cors");
 const morgan = require("morgan");
 require("events").EventEmitter.defaultMaxListeners = 20;
 const cookieParser = require("cookie-parser");
+const swaggerUi = require("swagger-ui-express");
+const fs = require("fs");
+const path = require("path");
+const { swaggerDocs } = require("./swagger");
 
 require("./src/config/db");
 
@@ -12,6 +16,16 @@ const PORT = process.env.PORT || 3000;
 dotenv.config();
 
 const app = express();
+
+// load the spec (JSON or YAML parsed to a JS object)
+const openapiSpec = JSON.parse(
+  fs.readFileSync(path.join(__dirname, "openapi.json"))
+);
+
+// Serve Swagger UI at /docs
+app.use("/docs", swaggerUi.serve, swaggerUi.setup(openapiSpec));
+
+swaggerDocs(app);
 
 // Middleware
 app.use(express.json());

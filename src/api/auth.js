@@ -16,7 +16,7 @@ const RESEND_COOLDOWN_MINUTES = 2;
 
 // sign up user and send email
 router.post(
-  "/signup",
+  "/sign-up",
   asyncHandler(async (req, res) => {
     const {
       avatar_url,
@@ -165,7 +165,7 @@ router.post(
         });
 
       res.status(201).json({
-        message: "Registration successful!",
+        message: "User registered successfully!",
         data: {
           userType,
           ...accessToken,
@@ -266,7 +266,7 @@ router.post(
             return { success: false, error: err.message };
           });
 
-        return res.json({
+        return res.status(200).json({
           message: "A new verification code has been sent to your email.",
         });
       }
@@ -299,7 +299,7 @@ router.post(
           return { success: false, error: err.message };
         });
 
-      res.json({
+      res.status(200).json({
         success: true,
         message: "Verification code sent successfully to your email or spam.",
       });
@@ -390,21 +390,54 @@ router.post(
         });
 
       // Step 5: Respond with success
-      res.json({
+      res.status(200).json({
         success: true,
         message:
           "Verification successful. User registered and welcome email sent.",
+        data: null,
       });
     } catch (error) {
       console.error("Verification error:", error);
-      res
-        .status(500)
-        .json({ success: false, message: "Server error during verification" });
+      res.status(500).json({
+        success: false,
+        message: "Server error during email verification",
+        data: null,
+      });
     }
   })
 );
 
 // Login user /login
+/**
+ * @swagger
+ * /auth/login:
+ *   post:
+ *     summary: Login user
+ *     description: Logs in a user with email and password.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: user@example.com
+ *               password:
+ *                 type: string
+ *                 example: password123
+ *     responses:
+ *       200:
+ *         description: Successful login
+ *       400:
+ *         description: Invalid credentials
+ *       500:
+ *         description: Successful login
+ *       401:
+ *         description: Invalid credentials
+ */
+
 router.post(
   "/login",
   asyncHandler(async (req, res) => {
@@ -416,8 +449,7 @@ router.post(
       // Ensure at least one identifier
       if (!user_key || user_key.trim() === "") {
         return res.status(400).json({
-          message:
-            "Authentication failed, Please provide either email or phone number",
+          message: "Please provide either email or phone number",
           data: null,
         });
       }
@@ -428,7 +460,7 @@ router.post(
 
       if (!identifier || !password) {
         return res.status(400).json({
-          message: "Authentication failed, Please fill all fields",
+          message: "Please fill all fields",
           data: null,
         });
       }
@@ -441,7 +473,7 @@ router.post(
 
       if (result.rows.length === 0) {
         return res.status(400).json({
-          message: "Authentication failed, User details not registered",
+          message: "User not registered. Please sign up.",
           data: null,
         });
       }
@@ -454,15 +486,23 @@ router.post(
 
       if (!isPasswordCorrect) {
         return res.status(400).json({
-          message: "Authentication failed, Invalid credentials",
+          message: "Wrong password!",
           data: null,
         });
       }
 
-      // Now validate identifier against the right column
-      if (user.email !== user_key && user.phone_number !== user_key) {
+      // validate email if identifier is email
+      if (user_key.includes("@") && user.email !== user_key) {
         return res.status(400).json({
-          message: "Authentication failed, Invalid credentials",
+          message: "Please provide a valid email address.",
+          data: null,
+        });
+      }
+
+      // validate phone number if identifier is phone number
+      if (!user_key.includes("@") && user.phone_number !== user_key) {
+        return res.status(400).json({
+          message: "Please provide a valid phone number.",
           data: null,
         });
       }
@@ -529,7 +569,7 @@ router.post(
     } catch (error) {
       console.error(error);
       return res.status(500).json({
-        message: "Authentication failed",
+        message: "Server error during login",
         data: null,
       });
     }

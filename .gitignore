@@ -15,3 +15,9 @@ yarn-error.log*
 dist
 build
 /src/generated/prisma
+.prisma/client
+*.sqlite
+*.sqlite3
+debug.log
+logs
+*.log

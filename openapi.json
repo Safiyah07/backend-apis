@@ -1,0 +1,308 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "title": "Backend APIs",
+    "version": "1.0.0",
+    "description": "API documentation for Backend APIs"
+  },
+  "servers": [
+    {
+      "url": "http://localhost:3000",
+      "description": "Local server"
+    }
+  ],
+  "paths": {
+    "/api/auth/sign-up": {
+      "post": {
+        "summary": "Register/Sign up a new user",
+        "tags": ["Auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "avatar_url": { "type": "string" },
+                  "first_name": { "type": "string" },
+                  "middle_name": { "type": "string" },
+                  "last_name": { "type": "string" },
+                  "email": { "type": "string", "format": "email" },
+                  "phone_number": { "type": "string", "format": "phone" },
+                  "password": { "type": "string", "format": "password" }
+                },
+                "required": [
+                  "first_name",
+                  "last_name",
+                  "email",
+                  "phone_number",
+                  "password",
+                  "confirm_password"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "User registered successfully"
+          },
+          "400": {
+            "description": "Bad Request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "examples": {
+                  "missing-fields": {
+                    "summary": "Missing required fields",
+                    "value": {
+                      "message": "Please fill all fields."
+                    }
+                  },
+                  "passwords": {
+                    "summary": "Wrong passwords",
+                    "value": {
+                      "message": "Passwords do not match."
+                    }
+                  },
+                  "existing-user": {
+                    "summary": "Already registered user",
+                    "value": {
+                      "message": "User already registered. Please log in."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error during registration"
+          }
+        }
+      }
+    },
+    "/api/auth/send-ver-code": {
+      "post": {
+        "summary": "Register/Sign up a new user and send verification code",
+        "tags": ["Auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "avatar_url": { "type": "string" },
+                  "first_name": { "type": "string" },
+                  "middle_name": { "type": "string" },
+                  "last_name": { "type": "string" },
+                  "email": { "type": "string", "format": "email" },
+                  "phone_number": { "type": "string", "format": "phone" },
+                  "password": { "type": "string", "format": "password" },
+                  "terms": { "type": "boolean", "format": "terms" }
+                },
+                "required": [
+                  "first_name",
+                  "last_name",
+                  "email",
+                  "phone_number",
+                  "password",
+                  "confirm_password"
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verification code sent successfully to your email or spam. Please verify to complete registration.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "examples": {
+                  "verified": {
+                    "summary": "Verification code sent.",
+                    "value": {
+                      "message": "Verification code sent successfully to your email or spam.."
+                    }
+                  },
+                  "resent": {
+                    "summary": "Verification code resent",
+                    "value": {
+                      "message": "A new verification code has been sent to your email."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "examples": {
+                  "passwords": {
+                    "summary": "Wrong passwords",
+                    "value": {
+                      "message": "Passwords do not match."
+                    }
+                  },
+                  "existing-user": {
+                    "summary": "Already registered user",
+                    "value": {
+                      "message": "User already registered. Please log in."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Too many requests. Please try again later."
+          },
+          "500": {
+            "description": "Server error while sending verification code."
+          }
+        }
+      }
+    },
+    "/api/auth/compare-ver-code": {
+      "post": {
+        "summary": "Compare verification code to verify user email and to complete user registration",
+        "tags": ["Auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": { "type": "string", "format": "email" },
+                  "code": { "type": "string", "format": "code" }
+                },
+                "required": ["email", "code"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verification code sent successfully to your email or spam. Please verify to complete registration."
+          },
+          "500": {
+            "description": "Server error during email verification."
+          }
+        }
+      }
+    },
+    "/api/auth/login": {
+      "post": {
+        "summary": "Login user",
+        "tags": ["Auth"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "user_key": { "type": "string", "format": "email || phone" },
+                  "password": { "type": "string", "format": "password" },
+                  "remember_user": {
+                    "type": "boolean",
+                    "format": "remember_user"
+                  }
+                },
+                "required": ["user_key", "password"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "User Login Successful."
+          },
+          "400": {
+            "description": "Bad Request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string"
+                    }
+                  }
+                },
+                "examples": {
+                  "missing-identifier": {
+                    "summary": "Missing email or phone number",
+                    "value": {
+                      "message": "Please provide either email or phone number"
+                    }
+                  },
+                  "missing-fields": {
+                    "summary": "Missing required fields",
+                    "value": {
+                      "message": "Please fill all fields."
+                    }
+                  },
+                  "not-found": {
+                    "summary": "User not found",
+                    "value": {
+                      "message": "User not registered. Please sign up."
+                    }
+                  },
+                  "wrong-password": {
+                    "summary": "Wrong password",
+                    "value": {
+                      "message": "Wrong password!"
+                    }
+                  },
+                  "wrong-email": {
+                    "summary": "Wrong email address",
+                    "value": {
+                      "message": "Please provide a valid email address."
+                    }
+                  },
+                  "wrong-phone": {
+                    "summary": "Wrong phone number",
+                    "value": {
+                      "message": "Please provide a valid phone number."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Server error during login."
+          }
+        }
+      }
+    }
+  },
+  "components": {}
+}

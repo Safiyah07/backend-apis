@@ -209,7 +209,7 @@
         },
         "responses": {
           "200": {
-            "description": "Verification code sent successfully to your email or spam. Please verify to complete registration."
+            "description": "Verification successful. User registered and welcome email sent."
           },
           "500": {
             "description": "Server error during email verification."

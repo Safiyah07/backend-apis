@@ -15,6 +15,59 @@ const generateSecureCode = (length = 4) => {
 const RESEND_COOLDOWN_MINUTES = 2;
 
 // sign up user and send email
+/**
+ * @swagger
+ * /api/auth/sign-up:
+ *   post:
+ *     summary: Register/Signup a new user
+ *     description: Register new user with user details.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - first_name
+ *               - last_name
+ *               - email
+ *               - phone_number
+ *               - password
+ *               - confirm_password
+ *             properties:
+ *               avatar_url:
+ *                 type: string
+ *                 example: https://example.com/avatar.jpg
+ *               first_name:
+ *                 type: string
+ *                 example: John
+ *               middle_name:
+ *                 type: string
+ *                 example: M
+ *               last_name:
+ *                 type: string
+ *                 example: Doe
+ *               email:
+ *                 type: string
+ *                 example: user@example.com
+ *               phone_number:
+ *                 type: string
+ *                 example: 08012345678
+ *               password:
+ *                 type: string
+ *                 example: password123
+ *               confirm_password:
+ *                 type: string
+ *                 example: password123
+ *     responses:
+ *       201:
+ *         description: User registered successfully
+ *       400:
+ *         description: Bad request (e.g., missing fields, wrong password)
+ *       500:
+ *         description: Server error during registration
+ */
+
 router.post(
   "/sign-up",
   asyncHandler(async (req, res) => {
@@ -182,6 +235,64 @@ router.post(
 );
 
 // send verification code for registration
+/**
+ * @swagger
+ * /api/auth/send-ver-code:
+ *   post:
+ *     summary: Register/Signup a new user and send verification code
+ *     description: Register new user with user details and send verification code.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - first_name
+ *               - last_name
+ *               - email
+ *               - phone_number
+ *               - password
+ *               - confirm_password
+ *             properties:
+ *               avatar_url:
+ *                 type: string
+ *                 example: https://example.com/avatar.jpg
+ *               first_name:
+ *                 type: string
+ *                 example: John
+ *               middle_name:
+ *                 type: string
+ *                 example: M
+ *               last_name:
+ *                 type: string
+ *                 example: Doe
+ *               email:
+ *                 type: string
+ *                 example: user@example.com
+ *               phone_number:
+ *                 type: string
+ *                 example: 08012345678
+ *               password:
+ *                 type: string
+ *                 example: password123
+ *               confirm_password:
+ *                 type: string
+ *                 example: password123
+ *               terms:
+ *                 type: boolean
+ *                 example: true/false
+ *     responses:
+ *       200:
+ *         description: Verification code sent successfully to your email or spam. Please verify to complete registration.
+ *       400:
+ *         description: Bad request (e.g., missing fields, wrong password)
+ *       429:
+ *         description: Too many requests - please try again later.
+ *       500:
+ *         description: Server error while sending verification code
+ */
+
 router.post(
   "/send-ver-code",
   asyncHandler(async (req, res) => {
@@ -314,6 +425,35 @@ router.post(
 );
 
 // compare verification code /compare-ver-code
+/**
+ * @swagger
+ * /api/auth/compare-ver-code:
+ *   post:
+ *     summary: Compare verification code to verify user email and to complete user registration
+ *     description: Complete registration of new user and confirm verification code.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - code
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 example: user@example.com
+ *               code:
+ *                 type: string
+ *                 example: 9876
+ *     responses:
+ *       200:
+ *         description: Verification successful. User registered and welcome email sent.
+ *       500:
+ *         description: Server error during email verification
+ */
+
 router.post(
   "/compare-ver-code",
   asyncHandler(async (req, res) => {
@@ -410,7 +550,7 @@ router.post(
 // Login user /login
 /**
  * @swagger
- * /auth/login:
+ * /api/auth/login:
  *   post:
  *     summary: Login user
  *     description: Logs in a user with email and password.
@@ -420,22 +560,27 @@ router.post(
  *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - user_key
+ *               - password
  *             properties:
- *               email:
+ *               user_key:
  *                 type: string
- *                 example: user@example.com
+ *                 example: user@example.com or 08012345678
  *               password:
  *                 type: string
  *                 example: password123
+ *               remember_user:
+ *                 type: boolean
+ *                 example: true
+ *                 default: false
  *     responses:
  *       200:
- *         description: Successful login
+ *         description: User successful login
  *       400:
- *         description: Invalid credentials
+ *         description: Bad request (e.g., missing fields, wrong password)
  *       500:
- *         description: Successful login
- *       401:
- *         description: Invalid credentials
+ *         description: Server error during login
  */
 
 router.post(
@@ -577,6 +722,41 @@ router.post(
 );
 
 // create / update password for users without/with password
+/**
+ * @swagger
+ * /api/auth/create-password:
+ *   post:
+ *     summary: Create or update password.
+ *     description: Create or update password for users without/with password.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - user_id
+ *               - password
+ *               - confirm_password
+ *             properties:
+ *               user_id:
+ *                 type: integer
+ *                 example: 1
+ *               password:
+ *                 type: string
+ *                 example: password123
+ *               confirm_password:
+ *                 type: string
+ *                 example: password123
+ *     responses:
+ *       200:
+ *         description: Password Creation Successful
+ *       400:
+ *         description: Bad request (e.g., missing fields, wrong password)
+ *       500:
+ *         description: Server error during login
+ */
+
 router.post(
   "/create-password",
   asyncHandler(async (req, res) => {
@@ -615,13 +795,50 @@ router.post(
         .status(200)
         .json({ message: "Password Creation Successful", data: null });
     } catch (error) {
-      return res.status(500).json({ message: "Server Error", data: null });
+      return res
+        .status(500)
+        .json({ message: "Server Error while creating password", data: null });
     }
   })
 );
 
-// START FROM HERE BELOW
+// START FROM HERE BELOW for swagger
 // refresh token
+/**
+ * @swagger
+ * /api/auth/refresh-token:
+ *   post:
+ *     summary: Refresh token.
+ *     description: Refresh token of user.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - user_id
+ *               - password
+ *               - confirm_password
+ *             properties:
+ *               user_id:
+ *                 type: integer
+ *                 example: 1
+ *               password:
+ *                 type: string
+ *                 example: password123
+ *               confirm_password:
+ *                 type: string
+ *                 example: password123
+ *     responses:
+ *       200:
+ *         description: Password Creation Successful
+ *       400:
+ *         description: Bad request (e.g., missing fields, wrong password)
+ *       500:
+ *         description: Server error during login
+ */
+
 router.post(
   "/refresh-token",
   asyncHandler(async (req, res) => {
@@ -693,6 +910,37 @@ router.post(
 );
 
 // forgot password
+/**
+ * @swagger
+ * /api/auth/forgot-password:
+ *   post:
+ *     summary: Forgot password.
+ *     description: Send email for forgot password.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - user_type
+ *               - email
+ *             properties:
+ *               user_type:
+ *                 type: string
+ *                 example: users
+ *               email:
+ *                 type: string
+ *                 example: user@example.com
+ *     responses:
+ *       200:
+ *         description: Password reset link sent.
+ *       400:
+ *         description: Bad request (e.g., Email not found)
+ *       500:
+ *         description: Server error during password reset
+ */
+
 router.post(
   "/forgot-password",
   asyncHandler(async (req, res) => {
@@ -705,7 +953,7 @@ router.post(
       );
 
       if (result.rows.length === 0) {
-        return res.status(401).json({ message: "Email not found" });
+        return res.status(400).json({ message: "Email not found" });
       }
 
       const user = result.rows[0];
@@ -758,6 +1006,39 @@ router.post(
 );
 
 // reset password
+/**
+ * @swagger
+ * /api/auth/reset-password:
+ *   post:
+ *     summary: Reset password.
+ *     description: To successfully reset password.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - token
+ *               - password
+ *             properties:
+ *               token:
+ *                 type: string
+ *                 example: 1920dnxsfwcwqhwe6w25272hwjnsa (representing JWT token)
+ *               password:
+ *                 type: string
+ *                 example: password123
+ *     responses:
+ *       200:
+ *         description: Password reset successful!.
+ *       400:
+ *         description: Bad request (e.g., Token not found)
+ *       401:
+ *         description: Unauthorized (e.g., Token expired or invalid)
+ *       500:
+ *         description: Server error during password reset.
+ */
+
 router.post(
   "/reset-password",
   asyncHandler(async (req, res) => {
@@ -786,7 +1067,7 @@ router.post(
 
       if (result.rows.length === 0) {
         return res
-          .status(401)
+          .status(400)
           .json({ message: "Token not found or already used", data: null });
       }
 
@@ -798,7 +1079,7 @@ router.post(
         // console.log(Date.now());
         // console.log(tokenData.expires_at);
         // console.log(new Date(tokenData.expires_at).getTime());
-        return res.status(400).json({ message: "Token has expired in DB" });
+        return res.status(401).json({ message: "Token has expired in DB" });
       }
 
       // Step 4: Compare provided token (raw) with hashed DB token
@@ -828,7 +1109,9 @@ router.post(
         .json({ message: "Password reset successful!", data: null });
     } catch (error) {
       console.error("Reset Password Error:", error);
-      res.status(500).json({ message: "Server error", data: null });
+      res
+        .status(500)
+        .json({ message: "Server error during password reset", data: null });
     }
   })
 );

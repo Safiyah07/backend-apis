@@ -4,7 +4,6 @@ const asyncHandler = require("express-async-handler");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const sendEmail = require("../service/sendEmail");
-
 const prisma = require("../config/db");
 
 const generateSecureCode = (length = 4) => {

@@ -47,6 +47,7 @@ app.get("/", (req, res) => {
 });
 
 app.use("/api/auth", require("./src/api/auth"));
+app.use("/api/users", require("./src/api/user"));
 
 // Start server
 app.listen(PORT, () => {

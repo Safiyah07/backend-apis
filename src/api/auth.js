@@ -20,6 +20,8 @@ const RESEND_COOLDOWN_MINUTES = 2;
  * /api/auth/sign-up:
  *   post:
  *     summary: Register/Signup a new user
+ *     tags:
+ *       - Authentication
  *     description: Register new user with user details.
  *     requestBody:
  *       required: true
@@ -245,6 +247,8 @@ router.post(
  * /api/auth/send-ver-code:
  *   post:
  *     summary: Register/Signup a new user and send verification code
+ *     tags:
+ *       - Authentication
  *     description: Register new user with user details and send verification code.
  *     requestBody:
  *       required: true
@@ -433,6 +437,8 @@ router.post(
  * /api/auth/compare-ver-code:
  *   post:
  *     summary: Compare verification code to verify user email and to complete user registration
+ *     tags:
+ *       - Authentication
  *     description: Complete registration of new user and confirm verification code.
  *     requestBody:
  *       required: true
@@ -564,6 +570,8 @@ router.post(
  * /api/auth/login:
  *   post:
  *     summary: Login user
+ *     tags:
+ *       - Authentication
  *     description: Logs in a user with email and password.
  *     requestBody:
  *       required: true
@@ -753,6 +761,8 @@ router.post(
  * /api/auth/create-password:
  *   post:
  *     summary: Create or update password.
+ *     tags:
+ *       - Authentication
  *     description: Create or update password for users without/with password.
  *     requestBody:
  *       required: true
@@ -839,6 +849,8 @@ router.post(
  * /api/auth/refresh-token:
  *   post:
  *     summary: Refresh access token
+ *     tags:
+ *       - Authentication
  *     description: Generates a new access/refresh token using the refresh token stored in cookies.
  *     parameters:
  *       - in: cookie
@@ -951,6 +963,8 @@ router.post(
  * /api/auth/forgot-password:
  *   post:
  *     summary: Forgot password.
+ *     tags:
+ *       - Authentication
  *     description: Send email for forgot password.
  *     requestBody:
  *       required: true
@@ -1050,6 +1064,8 @@ router.post(
  * /api/auth/reset-password:
  *   post:
  *     summary: Reset password.
+ *     tags:
+ *       - Authentication
  *     description: To successfully reset password.
  *     requestBody:
  *       required: true

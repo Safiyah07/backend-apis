@@ -1,10 +1,11 @@
 const express = require("express");
 const router = express.Router();
 const asyncHandler = require("express-async-handler");
-const pool = require("../config/db");
 const jwt = require("jsonwebtoken");
 const bcrypt = require("bcrypt");
 const sendEmail = require("../service/sendEmail");
+
+const prisma = require("../config/db");
 
 const generateSecureCode = (length = 4) => {
   return Math.random()
@@ -104,12 +105,12 @@ router.post(
     const hashedPassword = await bcrypt.hash(password, 10);
 
     try {
-      // check if user exists
-      const userExists = await pool.query(
-        "SELECT email FROM users WHERE email = $1",
-        [email]
-      );
-      if (userExists.rows.length > 0) {
+      const userExists = await prisma.users.findUnique({
+        where: { email },
+        select: { email: true },
+      });
+
+      if (userExists) {
         return res
           .status(400)
           .json({ message: "User already registered. Please log in." });
@@ -120,23 +121,19 @@ router.post(
       let user_code;
       while (!unique) {
         user_code = `S${Math.floor(100000 + Math.random() * 900000)}`; // e.g. S123456
-        const idCheck = await pool.query(
-          "SELECT id FROM users WHERE user_code = $1",
-          [user_code]
-        );
-        if (idCheck.rows.length === 0) {
+
+        const idCheck = await prisma.users.findUnique({
+          where: { user_code },
+          select: { id: true },
+        });
+        if (idCheck === null) {
           unique = true;
         }
       }
 
-      // insert new student into database
-      const user = await pool.query(
-        `INSERT INTO users 
-          (user_code, avatar_url, first_name, middle_name, last_name, email, phone_number, password)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-         RETURNING *
-        `,
-        [
+      // insert new user into database
+      const user = await prisma.users.create({
+        data: {
           user_code,
           avatar_url,
           first_name,
@@ -144,14 +141,14 @@ router.post(
           last_name,
           email,
           phone_number,
-          hashedPassword,
-        ]
-      );
+          password: hashedPassword,
+        },
+      });
 
       const userType = "user";
 
       // console.log(user.rows[0]);
-      const newUser = user.rows[0];
+      const newUser = user;
 
       // Step 4: Generate refresh/access token
       const { token: refreshToken, expiresAt } = generateRefreshToken(
@@ -159,28 +156,37 @@ router.post(
         userType
       );
 
-      const existingToken = await pool.query(
-        `SELECT id FROM refresh_tokens 
-          WHERE user_type = $1 AND user_id = $2 AND purpose = $3
-          ORDER BY expires_at DESC LIMIT 1
-        `,
-        [userType, newUser.id, `${userType} login`]
-      );
+      const existingToken = await prisma.refresh_tokens.findFirst({
+        where: {
+          user_type: userType,
+          user_id: newUser.id,
+          purpose: `${userType} login`,
+        },
+        orderBy: {
+          expires_at: "desc",
+        },
+        select: { id: true },
+      });
 
-      if (existingToken.rows.length > 0) {
-        await pool.query(
-          `UPDATE refresh_tokens
-            SET token = $1, expires_at = $2, revoked = false
-            WHERE id = $3
-          `,
-          [refreshToken, expiresAt, existingToken.rows[0].id]
-        );
+      if (existingToken) {
+        await prisma.refresh_tokens.update({
+          where: { id: existingToken.id },
+          data: {
+            token: refreshToken,
+            expires_at: expiresAt,
+            revoked: false,
+          },
+        });
       } else {
-        await pool.query(
-          `INSERT INTO refresh_tokens (user_type, user_id, token, expires_at, purpose)
-          VALUES ($1, $2, $3, $4, $5)`,
-          [userType, newUser.id, refreshToken, expiresAt, `${userType} login`]
-        );
+        await prisma.refresh_tokens.create({
+          data: {
+            user_type: userType,
+            user_id: newUser.id,
+            token: refreshToken,
+            expires_at: expiresAt,
+            purpose: `${userType} login`,
+          },
+        });
       }
 
       // Cookie options
@@ -332,22 +338,21 @@ router.post(
         Best regards,<br>The Admin Team`;
 
     try {
-      const userExists = await pool.query(
-        "SELECT email FROM users WHERE email = $1",
-        [email]
-      );
-      if (userExists.rows.length > 0) {
+      const userExists = await prisma.users.findUnique({
+        where: { email },
+        select: { email: true },
+      });
+      if (userExists) {
         return res.status(400).json({
           message: "User already registered. Please log in.",
         });
       }
 
-      const verificationResult = await pool.query(
-        "SELECT * FROM verification_codes WHERE email = $1",
-        [email]
-      );
+      const verificationResult = await prisma.verification_codes.findUnique({
+        where: { email },
+      });
 
-      if (verificationResult.rows.length > 0) {
+      if (verificationResult) {
         const existing = verificationResult.rows[0];
         const lastSentAt = new Date(existing.last_sent_at);
         const diffMs = now - lastSentAt;
@@ -362,12 +367,14 @@ router.post(
         }
 
         // Update existing record with new code + expires_at + last_sent_at
-        await pool.query(
-          `UPDATE verification_codes 
-				SET code = $1, expires_at = $2, last_sent_at = $3
-				WHERE email = $4`,
-          [code, expiresAt, now, email]
-        );
+        await prisma.verification_codes.update({
+          where: { email },
+          data: {
+            code,
+            expires_at: expiresAt,
+            last_sent_at: now,
+          },
+        });
 
         // Send email
         await sendEmail(to, subject, message)
@@ -383,24 +390,21 @@ router.post(
       }
 
       // Insert new pending verification
-      await pool.query(
-        `INSERT INTO verification_codes 
-				(code_for, first_name, middle_name, last_name, email, phone_number, password, terms, code, expires_at, last_sent_at)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
-        [
-          "signup with code",
+      await prisma.verification_codes.create({
+        data: {
+          code_for: "signup with code",
           first_name,
-          middle_name,
+          middle_name: middle_name || "",
           last_name,
           email,
           phone_number,
-          hashedPassword,
-          terms,
+          password: hashedPassword,
+          terms: terms || false,
           code,
-          expiresAt,
-          now,
-        ]
-      );
+          expires_at: expiresAt,
+          last_sent_at: now,
+        },
+      });
 
       // Send email
       await sendEmail(to, subject, message)
@@ -461,54 +465,62 @@ router.post(
 
     try {
       // Step 1: Check for a valid, unused, unexpired verification code
-      const result = await pool.query(
-        `SELECT * FROM verification_codes 
-			 WHERE email = $1 AND code = $2 AND used = FALSE AND expires_at > NOW()`,
-        [email, userCode]
-      );
+      // const result = await pool.query(
+      //   `SELECT * FROM verification_codes
+      //  WHERE email = $1 AND code = $2 AND used = FALSE AND expires_at > NOW()`,
+      //   [email, userCode]
+      // );
 
-      if (result.rows.length === 0) {
+      const result = await prisma.verification_codes.findFirst({
+        where: {
+          email,
+          code: userCode,
+          used: false,
+          expires_at: { gt: new Date() },
+        },
+      });
+
+      if (result === null) {
         return res.status(400).json({ error: "Invalid or expired code" });
       }
 
-      const verifiedUser = result.rows[0];
-      console.log(verifiedUser);
+      const verifiedUser = result;
 
       // generate unique user_code
       let unique = false;
       let user_code;
       while (!unique) {
         user_code = `S${Math.floor(100000 + Math.random() * 900000)}`; // e.g. S123456
-        const idCheck = await pool.query(
-          "SELECT id FROM users WHERE user_code = $1",
-          [user_code]
-        );
-        if (idCheck.rows.length === 0) {
+
+        const idCheck = await prisma.users.findUnique({
+          where: { user_code },
+          select: { id: true },
+        });
+
+        if (idCheck === null) {
           unique = true;
         }
       }
 
       // Step 2: Insert user data into `schools` table
-      await pool.query(
-        `INSERT INTO users 
-			(first_name, middle_name, last_name, email, phone_number, user_code, password, terms)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [
-          verifiedUser.first_name,
-          verifiedUser.middle_name,
-          verifiedUser.last_name,
-          verifiedUser.email,
-          verifiedUser.phone_number,
+
+      await prisma.users.create({
+        data: {
           user_code,
-          verifiedUser.password,
-          verifiedUser.terms,
-        ]
-      );
+          first_name: verifiedUser.first_name,
+          middle_name: verifiedUser.middle_name || "",
+          last_name: verifiedUser.last_name,
+          email: verifiedUser.email,
+          phone_number: verifiedUser.phone_number,
+          password: verifiedUser.password,
+          terms: verifiedUser.terms || false,
+        },
+      });
 
       // Step 3: Delete the used verification code
-      await pool.query(`DELETE FROM verification_codes WHERE id = $1`, [
-        verifiedUser.id,
-      ]);
+      await prisma.verification_codes.delete({
+        where: { id: verifiedUser.id },
+      });
 
       // Prepare welcome email content
       let to, subject, message;
@@ -611,19 +623,25 @@ router.post(
       }
 
       // Lookup by email OR phone_number
-      const result = await pool.query(
-        `SELECT * FROM ${table} WHERE email = $1 OR phone_number = $1`,
-        [identifier]
-      );
+      // const result = await pool.query(
+      //   `SELECT * FROM ${table} WHERE email = $1 OR phone_number = $1`,
+      //   [identifier]
+      // );
 
-      if (result.rows.length === 0) {
+      const result = await prisma.users.findFirst({
+        where: {
+          OR: [{ email: identifier }, { phone_number: identifier }],
+        },
+      });
+
+      if (result === null) {
         return res.status(400).json({
           message: "User not registered. Please sign up.",
           data: null,
         });
       }
 
-      const user = result.rows[0];
+      const user = result;
       // console.log(user);
 
       // Step 2: Compare password and admission number/email
@@ -661,28 +679,37 @@ router.post(
         userType
       );
 
-      const existingToken = await pool.query(
-        `SELECT id FROM refresh_tokens 
-          WHERE user_type = $1 AND user_id = $2 AND purpose = $3
-          ORDER BY expires_at DESC LIMIT 1
-        `,
-        [userType, user.id, `${userType} login`]
-      );
+      const existingToken = await prisma.refresh_tokens.findFirst({
+        where: {
+          user_type: userType,
+          user_id: user.id,
+          purpose: `${userType} login`,
+        },
+        orderBy: {
+          expires_at: "desc",
+        },
+        select: { id: true },
+      });
 
-      if (existingToken.rows.length > 0) {
-        await pool.query(
-          `UPDATE refresh_tokens
-            SET token = $1, expires_at = $2, revoked = false
-            WHERE id = $3
-          `,
-          [refreshToken, expiresAt, existingToken.rows[0].id]
-        );
+      if (existingToken) {
+        await prisma.refresh_tokens.update({
+          where: { id: existingToken.id },
+          data: {
+            token: refreshToken,
+            expires_at: expiresAt,
+            revoked: false,
+          },
+        });
       } else {
-        await pool.query(
-          `INSERT INTO refresh_tokens (user_type, user_id, token, expires_at, purpose)
-          VALUES ($1, $2, $3, $4, $5)`,
-          [userType, user.id, refreshToken, expiresAt, `${userType} login`]
-        );
+        await prisma.refresh_tokens.create({
+          data: {
+            user_type: userType,
+            user_id: user.id,
+            token: refreshToken,
+            expires_at: expiresAt,
+            purpose: `${userType} login`,
+          },
+        });
       }
 
       // Cookie options
@@ -773,11 +800,12 @@ router.post(
 
     try {
       // Check if student user_id exists
-      const result = await pool.query("SELECT * FROM users WHERE id = $1", [
-        user_id,
-      ]);
 
-      if (result.rows.length === 0) {
+      const result = await prisma.users.findUnique({
+        where: { id: user_id },
+      });
+
+      if (result === null) {
         return res.status(400).json({ error: "User not registered" });
       }
 
@@ -785,11 +813,14 @@ router.post(
       const hashedPassword = await bcrypt.hash(password, 10);
 
       // update existing user with hashed password
-      await pool.query(
-        `UPDATE users SET password = $1, updated_at = $2 WHERE id = $3`,
-        [hashedPassword, new Date(), user_id]
-      );
 
+      await prisma.users.update({
+        where: { id: user_id },
+        data: {
+          password: hashedPassword,
+          updated_at: new Date(),
+        },
+      });
       // return success message
       return res
         .status(200)
@@ -808,35 +839,30 @@ router.post(
  * @swagger
  * /api/auth/refresh-token:
  *   post:
- *     summary: Refresh token.
- *     description: Refresh token of user.
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - user_id
- *               - password
- *               - confirm_password
- *             properties:
- *               user_id:
- *                 type: integer
- *                 example: 1
- *               password:
- *                 type: string
- *                 example: password123
- *               confirm_password:
- *                 type: string
- *                 example: password123
+ *     summary: Refresh access token
+ *     description: Generates a new access/refresh token using the refresh token stored in cookies.
+ *     parameters:
+ *       - in: cookie
+ *         name: refreshToken
+ *         schema:
+ *           type: string
+ *         required: true
+ *         description: The refresh token stored in the user's cookies.
  *     responses:
  *       200:
- *         description: Password Creation Successful
- *       400:
- *         description: Bad request (e.g., missing fields, wrong password)
+ *         description: New access or refresh token successfully generated.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 accessToken:
+ *                   type: string
+ *                   example: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+ *       401:
+ *         description: Invalid or expired refresh token.
  *       500:
- *         description: Server error during login
+ *         description: Server error during refresh token auth.
  */
 
 router.post(
@@ -856,15 +882,17 @@ router.post(
       console.log(decoded);
       console.log(decoded.role);
       // check for id from decoded token
-      const tokens = await pool.query(
-        "SELECT * FROM refresh_tokens WHERE user_type = $1 AND user_id = $2",
-        [decoded.role, decoded.id]
-      );
+      const tokens = await prisma.refresh_tokens.findFirst({
+        where: {
+          user_type: decoded.role,
+          user_id: decoded.id,
+        },
+      });
 
       // if no id match
-      if (tokens.rowCount === 0) {
+      if (tokens === null) {
         return res
-          .status(403)
+          .status(401)
           .json({ message: "Refresh token not recognized" });
       }
 
@@ -876,15 +904,22 @@ router.post(
       }
 
       // Rotate: remove old token, insert new one
-      await pool.query(
-        "DELETE FROM refresh_tokens WHERE user_type = $1 AND user_id = $2",
-        [decoded.role, decoded.id]
-      );
+      await prisma.refresh_tokens.deleteMany({
+        where: {
+          user_type: decoded.role,
+          user_id: decoded.id,
+        },
+      });
 
-      await pool.query(
-        `INSERT INTO refresh_tokens (token, user_type, user_id, expires_at, purpose) VALUES($1, $2, $3, $4, $5)`,
-        [token, decoded.role, decoded.id, expiresAt, "renew"]
-      );
+      await prisma.refresh_tokens.create({
+        data: {
+          token: token,
+          user_type: decoded.role,
+          user_id: decoded.id,
+          expires_at: expiresAt,
+          purpose: "renew",
+        },
+      });
 
       // Generate new access token
       const newAccessToken = generateAccessToken({
@@ -894,6 +929,7 @@ router.post(
 
       // Send tokens
       res
+        .status(200)
         .cookie("refreshToken", token, {
           httpOnly: true,
           secure: false, // set to true in production with HTTPS
@@ -903,8 +939,9 @@ router.post(
         .json({ accessToken: newAccessToken });
     } catch (error) {
       console.log(error);
-      res.status(403);
-      throw new Error(error);
+      res
+        .status(500)
+        .json({ message: "Server error during refresh token auth." });
     }
   })
 );
@@ -947,16 +984,15 @@ router.post(
     const { user_type, email } = req.body;
 
     try {
-      const result = await pool.query(
-        `SELECT * FROM ${user_type} WHERE email = $1`,
-        [email]
-      );
+      const result = await prisma[user_type].findUnique({
+        where: { email },
+      });
 
-      if (result.rows.length === 0) {
+      if (result === null) {
         return res.status(400).json({ message: "Email not found" });
       }
 
-      const user = result.rows[0];
+      const user = result;
 
       // Generate raw reset token
       const resetToken = jwt.sign(
@@ -969,11 +1005,15 @@ router.post(
 
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
-      await pool.query(
-        `INSERT INTO refresh_tokens (token, user_type, user_id, expires_at, purpose)
-			 VALUES ($1, $2, $3, $4, $5)`,
-        [resetToken, user_type, user.id, expiresAt, "forgot password"]
-      );
+      await prisma.refresh_tokens.create({
+        data: {
+          token: resetToken,
+          user_type: user_type,
+          user_id: user.id,
+          expires_at: expiresAt,
+          purpose: "forgot password",
+        },
+      });
 
       // Create reset URL with raw token
       const resetUrl = `http://localhost:4200/auth/reset-password?token=${resetToken}`;
@@ -1058,20 +1098,26 @@ router.post(
       }
 
       // Step 2: Check if a matching token exists in DB and is unused
-      const result = await pool.query(
-        `SELECT * FROM refresh_tokens 
-			 WHERE user_type = $1 AND user_id = $2 AND purpose = $3 AND revoked = FALSE 
-			 ORDER BY expires_at DESC LIMIT 1`,
-        [decoded.user_type, decoded.id, "forgot password"]
-      );
 
-      if (result.rows.length === 0) {
+      const result = await prisma.refresh_tokens.findFirst({
+        where: {
+          user_type: decoded.user_type,
+          user_id: decoded.id,
+          purpose: "forgot password",
+          revoked: false,
+        },
+        orderBy: {
+          expires_at: "desc",
+        },
+      });
+
+      if (result === null) {
         return res
           .status(400)
           .json({ message: "Token not found or already used", data: null });
       }
 
-      const tokenData = result.rows[0];
+      const tokenData = result;
       // console.log(tokenData);
 
       // Step 3: Double-check token expiration in DB (extra safety)
@@ -1093,16 +1139,16 @@ router.post(
       const hashedPassword = await bcrypt.hash(password, salt);
 
       // Step 6: Update school password
-      await pool.query(
-        `UPDATE ${decoded.user_type} SET password = $1 WHERE id = $2`,
-        [hashedPassword, decoded.id]
-      );
+      await prisma[decoded.user_type].update({
+        where: { id: decoded.id },
+        data: { password: hashedPassword },
+      });
 
       // Step 7: Mark token as used
-      await pool.query(
-        "UPDATE refresh_tokens SET revoked = TRUE WHERE id = $1",
-        [tokenData.id]
-      );
+      await prisma.refresh_tokens.update({
+        where: { id: tokenData.id },
+        data: { revoked: true },
+      });
 
       res
         .status(200)

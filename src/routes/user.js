@@ -60,7 +60,7 @@ const prisma = require("../config/db");
  *                         currentPage:
  *                           type: integer
  *                           example: 1
- *                         pageSize:
+ *                         limit:
  *                           type: integer
  *                           example: 10
  *                     users:
@@ -167,7 +167,7 @@ router.get(
         totalUsers,
         totalPages,
         currentPage: page,
-        pageSize: limit,
+        limit,
       };
 
       res.status(200).json({
@@ -188,28 +188,48 @@ router.get(
 // create new user
 /**
  * @swagger
- * /api/users/user:
+ * /api/users:
  *   post:
- *     summary: Create a user
+ *     summary: Create a new user
+ *     description: Create a new user and store their information in the database.
  *     tags:
  *       - Users
- *     parameters:
- *       - in: query
- *         name: page
- *         schema:
- *           type: integer
- *           default: 1
- *         description: Page number for pagination
- *       - in: query
- *         name: limit
- *         schema:
- *           type: integer
- *           default: 10
- *         description: Number of users per page
- *     description: Get all users and their details.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - first_name
+ *               - last_name
+ *               - email
+ *               - password
+ *             properties:
+ *               avatar_url:
+ *                 type: string
+ *                 example: https://example.com/avatar.jpg
+ *               first_name:
+ *                 type: string
+ *                 example: John
+ *               middle_name:
+ *                 type: string
+ *                 example: Doe
+ *               last_name:
+ *                 type: string
+ *                 example: Smith
+ *               email:
+ *                 type: string
+ *                 example: johnsmith@email.com
+ *               phone_number:
+ *                 type: string
+ *                 example: +2341234567890
+ *               terms:
+ *                 type: boolean
+ *                 example: true
  *     responses:
- *       200:
- *         description: All users fetched successfully
+ *       201:
+ *         description: User created successfully
  *         content:
  *           application/json:
  *             schema:
@@ -217,53 +237,44 @@ router.get(
  *               properties:
  *                 success:
  *                   type: boolean
+ *                   example: true
  *                 message:
  *                   type: string
+ *                   example: User created successfully
  *                 data:
  *                   type: object
  *                   properties:
- *                     pagination:
- *                       type: object
- *                       properties:
- *                         totalUsers:
- *                           type: integer
- *                         totalPages:
- *                           type: integer
- *                         currentPage:
- *                           type: integer
- *                         pageSize:
- *                           type: integer
- *                     users:
- *                       type: array
- *                       items:
- *                         type: object
- *                         properties:
- *                           id:
- *                             type: integer
- *                           avatar_url:
- *                             type: string
- *                           first_name:
- *                             type: string
- *                           middle_name:
- *                             type: string
- *                           last_name:
- *                             type: string
- *                           email:
- *                             type: string
- *                           phone_number:
- *                             type: string
- *                           user_code:
- *                             type: string
- *                           terms:
- *                             type: boolean
- *                           created_at:
- *                             type: string
- *                             format: date-time
- *                           updated_at:
- *                             type: string
- *                             format: date-time
+ *                     id:
+ *                       type: integer
+ *                       example: 1
+ *                     avatar_url:
+ *                       type: string
+ *                     first_name:
+ *                       type: string
+ *                     middle_name:
+ *                       type: string
+ *                     last_name:
+ *                       type: string
+ *                     email:
+ *                       type: string
+ *                     phone_number:
+ *                       type: string
+ *                     user_code:
+ *                       type: string
+ *                     terms:
+ *                       type: boolean
+ *                     created_at:
+ *                       type: string
+ *                       format: date-time
+ *                     updated_at:
+ *                       type: string
+ *                       format: date-time
+ *       400:
+ *         description: Validation error or missing required fields
+ *       409:
+ *         description: User with email or phone number already exists
  *       500:
- *         description: Server error while fetching users
+ *         description: Server error while creating user
  */
 
 router.post(
@@ -293,10 +304,24 @@ router.post(
       });
 
       if (existingUser) {
-        return res.status(400).json({
+        return res.status(409).json({
           success: false,
           message: "User with this email already exists",
         });
+      }
+
+      let unique = false;
+      let user_code;
+      while (!unique) {
+        user_code = `S${Math.floor(100000 + Math.random() * 900000)}`; // e.g. S123456
+
+        const idCheck = await prisma.users.findUnique({
+          where: { user_code },
+          select: { id: true },
+        });
+        if (idCheck === null) {
+          unique = true;
+        }
       }
 
       // hash password
@@ -307,6 +332,8 @@ router.post(
           first_name,
           last_name,
           email,
+          phone_number,
+          user_code,
           password: hashedPassword,
         },
       });
@@ -317,6 +344,7 @@ router.post(
         data: newUser,
       });
     } catch (error) {
+      console.log(error);
       res.status(500).json({
         success: false,
         message: "Server Error while creating user",

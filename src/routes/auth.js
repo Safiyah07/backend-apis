@@ -146,7 +146,7 @@ router.post(
         },
       });
 
-      const userType = "user";
+      const userType = "users";
 
       // console.log(user.rows[0]);
       const newUser = user;
@@ -1109,6 +1109,7 @@ router.post(
         if (err.name === "TokenExpiredError") {
           return res.status(401).json({ message: "Token has expired" });
         }
+        console.log(err);
         return res.status(400).json({ message: "Invalid token" });
       }
 
@@ -1125,6 +1126,8 @@ router.post(
           expires_at: "desc",
         },
       });
+
+      console.log(result);
 
       if (result === null) {
         return res

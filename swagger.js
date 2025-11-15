@@ -7,7 +7,7 @@ const options = {
     info: {
       title: "Backend API Library",
       version: "1.0.0",
-      description: "Authentication-related APIs",
+      description: "API Library",
     },
   },
   apis: ["./src/api/*.js"],

@@ -46,8 +46,10 @@ app.get("/", (req, res) => {
   res.status(200).send("🚀 Server is running...");
 });
 
-app.use("/api/auth", require("./src/api/auth"));
-app.use("/api/users", require("./src/api/user"));
+app.use("/api/auth", require("./src/routes/auth"));
+app.use("/api/users", require("./src/routes/user"));
+// app.use("/api/notifications", require("./src/routes/notification"));
+app.use("/api/payments", require("./src/routes/payment"));
 
 // Start server
 app.listen(PORT, () => {

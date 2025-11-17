@@ -7,7 +7,7 @@ const prisma = require("../config/db");
 // get all users with pagination
 /**
  * @swagger
- * /api/users/all:
+ * /api/users:
  *   get:
  *     summary: Get all users with pagination and optional name filter
  *     description: Fetch a paginated list of users. You can optionally filter results by name (first, middle, or last).
@@ -122,7 +122,7 @@ const prisma = require("../config/db");
  */
 
 router.get(
-  "/all",
+  "/",
   asyncHandler(async (req, res) => {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 10;

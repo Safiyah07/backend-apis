@@ -51,16 +51,18 @@ model verification_codes {
   used         Boolean?  @default(false)
 }
 
-model payment {
+model Payment {
   id                Int       @id @default(autoincrement())
   user_type         String
   user_id           Int
   amount            Decimal   @db.Decimal(10, 2)
   currency          String    @default("NGN")
   reference         String    @unique
-  status            String    @default("pending")
+  status            String   @default("pending") // pending, paid, failed, cancelled, refunded, expired
   payment_provider  String?
   provider_response Json?
+  paid_at           DateTime?
   created_at        DateTime  @default(now())
   updated_at        DateTime  @updatedAt
+  expires_at        DateTime?
 }

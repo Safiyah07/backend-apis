@@ -7,9 +7,9 @@ const cookieParser = require("cookie-parser");
 const swaggerUi = require("swagger-ui-express");
 const fs = require("fs");
 const path = require("path");
-const { swaggerDocs } = require("./swagger");
+const { swaggerDocs } = require("../swagger");
 
-require("./src/config/db");
+require("./config/db");
 
 const PORT = process.env.PORT || 3000;
 
@@ -46,10 +46,10 @@ app.get("/", (req, res) => {
   res.status(200).send("🚀 Server is running...");
 });
 
-app.use("/api/auth", require("./src/routes/auth"));
-app.use("/api/users", require("./src/routes/user"));
+app.use("/api/auth", require("./routes/auth"));
+app.use("/api/users", require("./routes/user"));
+app.use("/api/payments", require("./routes/payment"));
 // app.use("/api/notifications", require("./src/routes/notification"));
-app.use("/api/payments", require("./src/routes/payment"));
 
 // Start server
 app.listen(PORT, () => {
